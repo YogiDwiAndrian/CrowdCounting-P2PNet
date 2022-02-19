@@ -41,8 +41,6 @@ def get_args_parser():
                         help="threshold for object detection")
     parser.add_argument('--mode', default=1, type=int,
                         help="--mode 1: preview output, --mode 2: generate and saving video, --mode 3: preview output and saving video")
-    parser.add_argument('--generate_vid', default=False, action='store_true',
-                        help="generating new video and save")
 
     parser.add_argument('--gpu_id', default=0, type=int, help='the gpu used for evaluation')
 
@@ -81,9 +79,10 @@ def main(args, debug=False):
     if (vidCap.isOpened() == False):
         print("Error reading video file")
 
-    fourcc = 'mp4v'  # output video codec
-    fps = vidCap.get(cv2.CAP_PROP_FPS)
-    vid_writer = cv2.VideoWriter(args.output_vid, cv2.VideoWriter_fourcc(*fourcc), fps, (720, 576))
+    if args.mode != 1:
+        fourcc = 'mp4v'  # output video codec
+        fps = vidCap.get(cv2.CAP_PROP_FPS)
+        vid_writer = cv2.VideoWriter(args.output_vid, cv2.VideoWriter_fourcc(*fourcc), fps, (720, 576))
 
     # set cv2
     size = 2
@@ -138,7 +137,8 @@ def main(args, debug=False):
             break
 
     vidCap.release()
-    vid_writer.release()
+    if args.mode != 1:
+        vid_writer.release()
 
 
 if __name__ == '__main__':

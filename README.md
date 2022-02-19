@@ -7,15 +7,15 @@ A brief introduction of P2PNet can be found at [机器之心 (almosthuman)](http
 The codes is tested with PyTorch 1.5.0. It may not run with other versions.
 
 ## Visualized demos for P2PNet
-<img src="vis/congested1.png" width="1000"/>   
-<img src="vis/congested2.png" width="1000"/> 
-<img src="vis/congested3.png" width="1000"/> 
+<img src="data/image/congested1.png" width="1000"/>   
+<img src="data/image/congested2.png" width="1000"/> 
+<img src="data/image/congested3.png" width="1000"/> 
 
 ## The network
 The overall architecture of the P2PNet. Built upon the VGG16, it firstly introduce an upsampling path to obtain fine-grained feature map. 
 Then it exploits two branches to simultaneously predict a set of point proposals and their confidence scores.
 
-<img src="vis/net.png" width="1000"/>   
+<img src="data/image/net.png" width="1000"/>   
 
 ## Comparison with state-of-the-art methods
 The P2PNet achieved state-of-the-art performance on several challenging datasets with various densities.
@@ -136,8 +136,16 @@ By default, a periodic evaluation will be conducted on the validation set.
 
 A trained model (with an MAE of **51.96**) on SHTechPartA is available at "./weights", run the following commands to launch a visualization demo:
 
+Note: You can download [vgg16_bn](https://download.pytorch.org/models/vgg16_bn-6c64b313.pth) weight and put it in the weights folder.
+
+- **Testing with image**
 ```
-CUDA_VISIBLE_DEVICES=0 python run_test.py --weight_path ./weights/SHTechA.pth --output_dir ./logs/
+CUDA_VISIBLE_DEVICES=0 python test_img.py 
+```
+
+- **Testing with video**
+```
+CUDA_VISIBLE_DEVICES=0 python test_video.py 
 ```
 
 ## Acknowledgements

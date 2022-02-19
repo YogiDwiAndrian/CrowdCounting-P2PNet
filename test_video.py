@@ -39,6 +39,8 @@ def get_args_parser():
                         help='path where the trained weights saved')
     parser.add_argument('--threshold', default=0.5, type=float,
                         help="threshold for object detection")
+    parser.add_argument('--mode', default=1, type=int,
+                        help="--mode 1: preview output, --mode 2: generate and saving video, --mode 3: preview output and saving video")
     parser.add_argument('--generate_vid', default=False, action='store_true',
                         help="generating new video and save")
 
@@ -81,7 +83,7 @@ def main(args, debug=False):
 
     fourcc = 'mp4v'  # output video codec
     fps = vidCap.get(cv2.CAP_PROP_FPS)
-    vid_writer = cv2.VideoWriter(args.output_dir, cv2.VideoWriter_fourcc(*fourcc), fps, (720, 576))
+    vid_writer = cv2.VideoWriter(args.output_vid, cv2.VideoWriter_fourcc(*fourcc), fps, (720, 576))
 
     # set cv2
     size = 2
@@ -117,11 +119,16 @@ def main(args, debug=False):
             img_to_draw = cv2.rectangle(img_to_draw, start_point, end_point, (34, 34, 178), -1)
             img_to_draw = cv2.putText(img_to_draw, f"Count : {predict_cnt}", (0, 45), fontface, fontscale, fontcolor)
 
-            # show preview video
-            cv2.imshow("video", img_to_draw)
-
-            # generating video
-            if args.generate_vid == True:
+            if args.mode == 1:
+                # show preview video
+                cv2.imshow("video", img_to_draw)
+            elif args.mode == 2:
+                # generate and saving video
+                vid_writer.write(img_to_draw)
+            else:
+                # show preview video
+                cv2.imshow("video", img_to_draw)
+                # generate and saving video
                 vid_writer.write(img_to_draw)
 
             if cv2.waitKey(1) == ord('q'):

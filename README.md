@@ -143,9 +143,35 @@ Note: You can download [vgg16_bn](https://download.pytorch.org/models/vgg16_bn-6
 CUDA_VISIBLE_DEVICES=0 python test_img.py 
 ```
 
-- **Testing with video**
+Argument:
 ```
-CUDA_VISIBLE_DEVICES=0 python test_video.py 
+    --backbone 
+    --row 
+    --line 
+    --input_img 
+    --output_dir 
+    --weight_path 
+    --threshold 
+    --gpu_id 
+```
+
+- **Testing with video**
+
+```
+CUDA_VISIBLE_DEVICES=0 python test_video.py --mode 1
+```
+
+Argument:
+```
+    --backbone 
+    --row 
+    --line 
+    --input_vid 
+    --output_vid 
+    --weight_path 
+    --threshold 
+    --mode
+    --gpu_id 
 ```
 
 ## Acknowledgements

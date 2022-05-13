@@ -74,9 +74,31 @@ D2CNet | <u>0.700</u> | **0.741**  | 0.662 |
 ## Installation
 * Clone this repo into a directory named P2PNET_ROOT
 * Organize your datasets as required
-* Install Python dependencies. We use python 3.6.5 and pytorch 1.5.0
+* Install Python dependencies. We use python 3.6.5, pytorch 1.5.0, and CUDA 10.2
 ```
 pip install -r requirements.txt
+```
+
+* OR
+
+If you use another version above it like an example using python 3.8 and CUDA 11.4
+```
+pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu113
+pip install opencv-python
+pip install scipy
+```
+
+And remove a few lines of code in the file `util/misc.py`
+```
+* line 25-27:
+if float(torchvision.__version__[:3]) < 0.7:
+    from torchvision.ops import _new_empty_tensor
+    from torchvision.ops.misc import _output_size
+
+* line 456-358:
+output_shape = _output_size(2, input, size, scale_factor)
+output_shape = list(input.shape[:-2]) + list(output_shape)
+return _new_empty_tensor(input, output_shape)
 ```
 
 ## Organize the counting dataset
@@ -117,7 +139,7 @@ x2 y2
 The network can be trained using the `train.py` script. For training on SHTechPartA, use
 
 ```
-CUDA_VISIBLE_DEVICES=0 python train.py --data_root $DATA_ROOT \
+python train.py --data_root $DATA_ROOT \
     --dataset_file SHHA \
     --epochs 3500 \
     --lr_drop 3500 \
@@ -140,7 +162,7 @@ Note: You can download [vgg16_bn](https://download.pytorch.org/models/vgg16_bn-6
 
 - **Testing with image**
 ```
-CUDA_VISIBLE_DEVICES=0 python test_img.py 
+python test_img.py 
 ```
 
 Argument:
@@ -158,7 +180,7 @@ Argument:
 - **Testing with video**
 
 ```
-CUDA_VISIBLE_DEVICES=0 python test_video.py --mode 1
+python test_video.py --mode 1
 ```
 
 Argument:

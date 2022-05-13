@@ -116,7 +116,9 @@ def main(args, debug=False):
 
             # draw count the predictions
             img_to_draw = cv2.rectangle(img_to_draw, start_point, end_point, (34, 34, 178), -1)
-            img_to_draw = cv2.putText(img_to_draw, f"Count : {predict_cnt}", (0, 45), fontface, fontscale, fontcolor)
+            img_to_draw = cv2.putText(img_to_draw, f"Count : {predict_cnt}", (5, 45), fontface, fontscale, fontcolor)
+            img_to_draw = cv2.rectangle(img_to_draw, (420, 2), (1000, 20), (34, 34, 178), -1)
+            # img_to_draw = cv2.putText(img_to_draw, f"by SYNNEX METRODATA INDONESIA & DAMAI   ", (430, 15), fontface, 0.4, fontcolor)
 
             if args.mode == 1:
                 # show preview video

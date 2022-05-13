@@ -5,218 +5,145 @@ import time
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader, DistributedSampler
+import torchvision.transforms as standard_transforms
+import numpy as np
 
+from PIL import Image
+import cv2
 from crowd_datasets import build_dataset
 from engine import *
 from models import build_model
 import os
-from tensorboardX import SummaryWriter
 import warnings
+
 warnings.filterwarnings('ignore')
 
-def get_args_parser():
-    parser = argparse.ArgumentParser('Set parameters for training P2PNet', add_help=False)
-    parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--lr_backbone', default=1e-5, type=float)
-    parser.add_argument('--batch_size', default=8, type=int)
-    parser.add_argument('--weight_decay', default=1e-4, type=float)
-    parser.add_argument('--epochs', default=3500, type=int)
-    parser.add_argument('--lr_drop', default=3500, type=int)
-    parser.add_argument('--clip_max_norm', default=0.1, type=float,
-                        help='gradient clipping max norm')
 
-    # Model parameters
-    parser.add_argument('--frozen_weights', type=str, default=None,
-                        help="Path to the pretrained model. If set, only the mask head will be trained")
+def get_args_parser():
+    parser = argparse.ArgumentParser('Set parameters for P2PNet evaluation', add_help=False)
 
     # * Backbone
     parser.add_argument('--backbone', default='vgg16_bn', type=str,
-                        help="Name of the convolutional backbone to use")
+                        help="name of the convolutional backbone to use")
 
-    # * Matcher
-    parser.add_argument('--set_cost_class', default=1, type=float,
-                        help="Class coefficient in the matching cost")
-
-    parser.add_argument('--set_cost_point', default=0.05, type=float,
-                        help="L1 point coefficient in the matching cost")
-
-    # * Loss coefficients
-    parser.add_argument('--point_loss_coef', default=0.0002, type=float)
-
-    parser.add_argument('--eos_coef', default=0.5, type=float,
-                        help="Relative classification weight of the no-object class")
     parser.add_argument('--row', default=2, type=int,
                         help="row number of anchor points")
     parser.add_argument('--line', default=2, type=int,
                         help="line number of anchor points")
 
-    # dataset parameters
-    parser.add_argument('--dataset_file', default='SHHA')
-    parser.add_argument('--data_root', default='./new_public_density_data',
-                        help='path where the dataset is')
-    
-    parser.add_argument('--output_dir', default='./log',
-                        help='path where to save, empty for no saving')
-    parser.add_argument('--checkpoints_dir', default='./ckpt',
-                        help='path where to save checkpoints, empty for no saving')
-    parser.add_argument('--tensorboard_dir', default='./runs',
-                        help='path where to save, empty for no saving')
+    parser.add_argument('--input_vid', default='./data/video/crowd.mp4',
+                        help="path where video input")
+    parser.add_argument('--output_vid', default='./data/output/crowd_result.mp4',
+                        help='path where to save')
+    parser.add_argument('--weight_path', default='./weights/SHTechA.pth',
+                        help='path where the trained weights saved')
+    parser.add_argument('--threshold', default=0.5, type=float,
+                        help="threshold for object detection")
+    parser.add_argument('--mode', default=1, type=int,
+                        help="--mode 1: preview output, --mode 2: generate and saving video, --mode 3: preview output and saving video")
 
-    parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
-    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
-                        help='start epoch')
-    parser.add_argument('--eval', action='store_true')
-    parser.add_argument('--num_workers', default=8, type=int)
-    parser.add_argument('--eval_freq', default=5, type=int,
-                        help='frequency of evaluation, default setting is evaluating in every 5 epoch')
-    parser.add_argument('--gpu_id', default=0, type=int, help='the gpu used for training')
+    parser.add_argument('--gpu_id', default=0, type=int, help='the gpu used for evaluation')
 
     return parser
 
-def main(args):
+
+def resize(frame):
+    # load the images
+    img_cv = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    img_raw = Image.fromarray(img_cv)
+    return img_raw.resize((720, 576), Image.ANTIALIAS)
+
+def main(args, debug=False):
     os.environ["CUDA_VISIBLE_DEVICES"] = '{}'.format(args.gpu_id)
-    # create the logging file
-    run_log_name = os.path.join(args.output_dir, 'run_log.txt')
-    with open(run_log_name, "w") as log_file:
-        log_file.write('Eval Log %s\n' % time.strftime("%c"))
 
-    if args.frozen_weights is not None:
-        assert args.masks, "Frozen training is meant for segmentation only"
-    # backup the arguments
     print(args)
-    with open(run_log_name, "a") as log_file:
-        log_file.write("{}".format(args))
-    device = torch.device('cuda')
-    # fix the seed for reproducibility
-    seed = args.seed + utils.get_rank()
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    # get the P2PNet model
-    model, criterion = build_model(args, training=True)
-    # move to GPU
-    model.to(device)
-    criterion.to(device)
+    # get the P2PNet
+    model = build_model(args)
+    # GPU
+    model = model.cuda()
+    # load trained model
+    if args.weight_path is not None:
+        checkpoint = torch.load(args.weight_path, map_location='cpu')
+        model.load_state_dict(checkpoint['model'])
+    # convert to eval mode
+    model.eval()
+    # create the pre-processing transform
+    transform = standard_transforms.Compose([
+        standard_transforms.ToTensor(),
+        standard_transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
 
-    model_without_ddp = model
+    # set your video path here
+    vidCap = cv2.VideoCapture(args.input_vid)
 
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('number of params:', n_parameters)
-    # use different optimation params for different parts of the model
-    param_dicts = [
-        {"params": [p for n, p in model_without_ddp.named_parameters() if "backbone" not in n and p.requires_grad]},
-        {
-            "params": [p for n, p in model_without_ddp.named_parameters() if "backbone" in n and p.requires_grad],
-            "lr": args.lr_backbone,
-        },
-    ]
-    # Adam is used by default
-    optimizer = torch.optim.Adam(param_dicts, lr=args.lr)
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
-    # create the dataset
-    loading_data = build_dataset(args=args)
-    # create the training and valiation set
-    train_set, val_set = loading_data(args.data_root)
-    # create the sampler used during training
-    sampler_train = torch.utils.data.RandomSampler(train_set)
-    sampler_val = torch.utils.data.SequentialSampler(val_set)
+    if (vidCap.isOpened() == False):
+        print("Error reading video file")
 
-    batch_sampler_train = torch.utils.data.BatchSampler(
-        sampler_train, args.batch_size, drop_last=True)
-    # the dataloader for training
-    data_loader_train = DataLoader(train_set, batch_sampler=batch_sampler_train,
-                                   collate_fn=utils.collate_fn_crowd, num_workers=args.num_workers)
+    if args.mode != 1:
+        fourcc = 'mp4v'  # output video codec
+        fps = vidCap.get(cv2.CAP_PROP_FPS)
+        vid_writer = cv2.VideoWriter(args.output_vid, cv2.VideoWriter_fourcc(*fourcc), fps, (720, 576))
 
-    data_loader_val = DataLoader(val_set, 1, sampler=sampler_val,
-                                    drop_last=False, collate_fn=utils.collate_fn_crowd, num_workers=args.num_workers)
+    # set cv2
+    size = 2
+    fontface = cv2.FONT_HERSHEY_DUPLEX
+    fontscale = 0.6
+    fontcolor = (255, 255, 255)
+    start_point = (0, 22)
+    end_point = (135, 56)
+    while (True):
+        ret, frame = vidCap.read()  # reads the next frame
 
-    if args.frozen_weights is not None:
-        checkpoint = torch.load(args.frozen_weights, map_location='cpu')
-        model_without_ddp.detr.load_state_dict(checkpoint['model'])
-    # resume the weights and training state if exists
-    if args.resume:
-        checkpoint = torch.load(args.resume, map_location='cpu')
-        model_without_ddp.load_state_dict(checkpoint['model'])
-        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-            args.start_epoch = checkpoint['epoch'] + 1
+        if ret == True:
+            img_resize = resize(frame)
+            # pre-proccessing
+            img = transform(img_resize).cuda()
 
-    print("Start training")
-    start_time = time.time()
-    # save the performance during the training
-    mae = []
-    mse = []
-    # the logger writer
-    writer = SummaryWriter(args.tensorboard_dir)
-    
-    step = 0
-    # training starts here
-    for epoch in range(args.start_epoch, args.epochs):
-        t1 = time.time()
-        stat = train_one_epoch(
-            model, criterion, data_loader_train, optimizer, device, epoch,
-            args.clip_max_norm)
+            # run inference
+            outputs = model(img.unsqueeze(0))
+            outputs_scores = torch.nn.functional.softmax(outputs['pred_logits'], -1)[:, :, 1][0]
 
-        # record the training states after every epoch
-        if writer is not None:
-            with open(run_log_name, "a") as log_file:
-                log_file.write("loss/loss@{}: {}".format(epoch, stat['loss']))
-                log_file.write("loss/loss_ce@{}: {}".format(epoch, stat['loss_ce']))
-                
-            writer.add_scalar('loss/loss', stat['loss'], epoch)
-            writer.add_scalar('loss/loss_ce', stat['loss_ce'], epoch)
+            outputs_points = outputs['pred_points'][0]
 
-        t2 = time.time()
-        print('[ep %d][lr %.7f][%.2fs]' % \
-              (epoch, optimizer.param_groups[0]['lr'], t2 - t1))
-        with open(run_log_name, "a") as log_file:
-            log_file.write('[ep %d][lr %.7f][%.2fs]' % (epoch, optimizer.param_groups[0]['lr'], t2 - t1))
-        # change lr according to the scheduler
-        lr_scheduler.step()
-        # save latest weights every epoch
-        checkpoint_latest_path = os.path.join(args.checkpoints_dir, 'latest.pth')
-        torch.save({
-            'model': model_without_ddp.state_dict(),
-        }, checkpoint_latest_path)
-        # run evaluation
-        if epoch % args.eval_freq == 0 and epoch != 0:
-            t1 = time.time()
-            result = evaluate_crowd_no_overlap(model, data_loader_val, device)
-            t2 = time.time()
+            # filter the predictions
+            points = outputs_points[outputs_scores > args.threshold].detach().cpu().numpy().tolist()
+            predict_cnt = int((outputs_scores > args.threshold).sum())
 
-            mae.append(result[0])
-            mse.append(result[1])
-            # print the evaluation results
-            print('=======================================test=======================================')
-            print("mae:", result[0], "mse:", result[1], "time:", t2 - t1, "best mae:", np.min(mae), )
-            with open(run_log_name, "a") as log_file:
-                log_file.write("mae:{}, mse:{}, time:{}, best mae:{}".format(result[0], 
-                                result[1], t2 - t1, np.min(mae)))
-            print('=======================================test=======================================')
-            # recored the evaluation results
-            if writer is not None:
-                with open(run_log_name, "a") as log_file:
-                    log_file.write("metric/mae@{}: {}".format(step, result[0]))
-                    log_file.write("metric/mse@{}: {}".format(step, result[1]))
-                writer.add_scalar('metric/mae', result[0], step)
-                writer.add_scalar('metric/mse', result[1], step)
-                step += 1
+            # draw circle the predictions
+            img_to_draw = cv2.cvtColor(np.array(img_resize), cv2.COLOR_RGB2BGR)
+            for p in points:
+                img_to_draw = cv2.circle(img_to_draw, (int(p[0]), int(p[1])), size, (0, 0, 255), -1)
 
-            # save the best model since begining
-            if abs(np.min(mae) - result[0]) < 0.01:
-                checkpoint_best_path = os.path.join(args.checkpoints_dir, 'best_mae.pth')
-                torch.save({
-                    'model': model_without_ddp.state_dict(),
-                }, checkpoint_best_path)
-    # total time for training
-    total_time = time.time() - start_time
-    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
+            # draw count the predictions
+            img_to_draw = cv2.rectangle(img_to_draw, start_point, end_point, (34, 34, 178), -1)
+            img_to_draw = cv2.putText(img_to_draw, f"Count : {predict_cnt}", (5, 45), fontface, fontscale, fontcolor)
+            img_to_draw = cv2.rectangle(img_to_draw, (420, 2), (1000, 20), (34, 34, 178), -1)
+            # img_to_draw = cv2.putText(img_to_draw, f"by SYNNEX METRODATA INDONESIA & DAMAI   ", (430, 15), fontface, 0.4, fontcolor)
+
+            if args.mode == 1:
+                # show preview video
+                cv2.imshow("video", img_to_draw)
+            elif args.mode == 2:
+                # generate and saving video
+                vid_writer.write(img_to_draw)
+            else:
+                # show preview video
+                cv2.imshow("video", img_to_draw)
+                # generate and saving video
+                vid_writer.write(img_to_draw)
+
+            if cv2.waitKey(1) == ord('q'):
+                break
+
+        else:
+            break
+
+    vidCap.release()
+    if args.mode != 1:
+        vid_writer.release()
+
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('P2PNet training and evaluation script', parents=[get_args_parser()])
+    parser = argparse.ArgumentParser('P2PNet evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
     main(args)
